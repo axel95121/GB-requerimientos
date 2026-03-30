@@ -1,9 +1,8 @@
 
-# Requerimientos críticos — Proyecto Marketplace
+# Requerimientos BACKEND
 
 **Semana:** 30 al 33 de Marzo  
-**Proyecto:** GB97 — Marketplace  
-**Tipo:** Backend
+**Proyecto:** Marketplace | Order GB97
 
 ---
 
@@ -176,3 +175,13 @@ Si `pagination` no viene en la respuesta o es `null`, el frontend asume que no h
 ## 6. Búsqueda por `name`
 
 Cuando el body incluye `"name": "polo"`, el backend debe hacer **búsqueda parcial** (case-insensitive). El frontend NO envía operadores regex; envía el string directo y espera que el backend lo resuelva internamente (ej. `{ $regex: "polo", $options: "i" }` en Mongo).
+
+---
+
+## 7. Requerimientos Facturación
+
+**Habilitar modo DEV:** Para pruebas de Contabilidad
+
+**Listado de modalidades de pago:** EFECTIVO, CHEQUE, TRANSFERENCIA, TARJETA DE CRÉDITO, OTROS CON UTILIZACIÓN DEL SISTEMA FINANCIERO, SIN UTILIZACIÓN DEL SISTEMA FINANCIERO.
+
+**Habilitar array de informacion adicional:** Actualmente sólo existe un campo, y en la práctica el contador de GB97 nos indica que normalmente en los sistemas de facturación se puede habilitar más de uno.
