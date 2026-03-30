@@ -1,7 +1,7 @@
 
 # Requerimientos BACKEND
 
-**Semana:** 30 al 33 de Marzo  
+**Semana:** 30 de Marzo al 02 de Abril
 **Proyecto:** Marketplace | Order GB97
 
 ---
