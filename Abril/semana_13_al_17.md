@@ -222,7 +222,11 @@ Si la fecha de vencimiento ya pasó y la cuota sigue en `status: "pending"`:
 **Mensaje sugerido:**  
 > "Aviso: Su cuota #[número] por $[monto] está vencida desde el [fecha]. Por favor, regularice su pago a la brevedad."
 
-#### D) Consideraciones adicionales
+#### C) Notificación asíncrona (manual)
+
+- Habilitar un servicio de correo (cualquiera de los ya disponibles) para poder emitir correos desde la app con este detalle. Desde el back especificar o dividir los campos para el contenido del mismo
+
+#### E) Consideraciones adicionales
 
 - **Cuota inicial (enganche/`downPayment`):** Si existe un `downPayment > 0`, este ya se registra como pago al momento de crear la orden, por lo que no requiere recordatorio.
 - **Verificación de pago:** Antes de enviar cualquier notificación, el backend debe verificar en la orden si la cuota ya fue pagada (`status: "paid"` o si `paidDate` no es null).
