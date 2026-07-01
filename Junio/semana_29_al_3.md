@@ -176,3 +176,278 @@ Se necesita poder determinar **qué usuario realizó qué acción** sobre los re
 | BE-04 | Nombre único en ítems/combos/extras por organización y sucursal | 🟡 Coordinado | Pendiente |
 | BE-05 | Campo `barcodes` en ítems variantes | 🟢 Independiente | Pendiente |
 | BE-06 | Auditoría: usuario y acción por registro | 🟡 Coordinado | Pendiente |
+
+# Requerimiento Backend — Tipo de documento en registro de cliente
+
+**Fecha:** 2026-07-01  
+**Prioridad:** Alta  
+**Alcance:** Registro y gestión de datos de persona para clientes marketplace (módulo personas/clientes).
+
+---
+
+## 1) Contexto actual
+
+En el frontend, el registro de cliente reutiliza los campos de persona y actualmente decide validaciones por **tipo de persona**:
+
+- `type = 1` Persona natural
+- `type = 2` Persona jurídica
+
+Hoy no existe un campo explícito de tipo de documento. El número de documento (`personId`) se interpreta implícitamente según `type`:
+
+- Natural => cédula
+- Jurídica => RUC
+
+Con el nuevo requerimiento se necesita soportar también **pasaporte** en el registro de cliente.
+
+---
+
+## 2) Objetivo
+
+Incorporar un campo explícito `documentType` para separar correctamente:
+
+1. Tipo de persona (natural/jurídica).
+2. Tipo de documento (cédula/RUC/pasaporte).
+3. Número de documento (`personId`).
+
+Esto permite extender reglas de validación sin romper la lógica ya desplegada.
+
+---
+
+## 3) Requerimiento funcional
+
+### 3.1 Nuevo campo obligatorio en persona
+
+Agregar en entidad `persona`:
+
+- `documentType`: `cedula | ruc | pasaporte`
+
+### 3.2 Reglas de consistencia entre tipo de persona y tipo de documento
+
+Reglas propuestas:
+
+1. Si `type = 1` (natural), se permite `cedula` o `pasaporte`.
+2. Si `type = 2` (jurídica), se permite solo `ruc`.
+3. Si llega combinación inválida, responder error de validación (`400`) con mensaje claro.
+
+### 3.3 Reglas mínimas de validación de número de documento (`personId`)
+
+1. `cedula`: 10 dígitos numéricos.
+2. `ruc`: 13 dígitos numéricos y validaciones vigentes de RUC.
+3. `pasaporte`: alfanumérico, longitud entre 6 y 20 (normalizado a mayúsculas, sin espacios al inicio/fin).
+
+> Nota: estas reglas pueden ajustarse según normativa interna, pero se recomienda establecerlas en backend como fuente de verdad.
+
+### 3.4 Impacto en entidad cliente
+
+Sí existe impacto en `cliente` cuando ese modelo almacena datos documentales
+propios (por ejemplo `num_document`) o cuando sus respuestas son usadas por
+pantallas administrativas/reportes sin expandir la relación de persona.
+
+Decisión recomendada:
+
+1. Mantener `persona` como fuente de verdad de identidad (`personId`, `documentType`, `type`).
+2. En `cliente`, evitar duplicar la lógica de validación documental.
+3. Si `cliente` mantiene campos denormalizados por compatibilidad (ej. `num_document`), sincronizarlos desde `persona`.
+
+Regla de consistencia sugerida:
+
+1. Si existe `cliente.personId` (ObjectId/ref), su documento efectivo proviene de `persona`.
+2. Si existe `cliente.num_document` por legado, debe coincidir con `persona.personId`.
+3. Para nuevas integraciones, priorizar lectura desde `persona` o exponer campos normalizados en la respuesta de cliente.
+
+---
+
+## 4) Contrato API propuesto
+
+## 4.1 Crear persona
+
+**POST** `/personas`
+
+Request:
+
+```json
+{
+  "personId": "A1234567",
+  "documentType": "pasaporte",
+  "type": 1,
+  "name": "Juan",
+  "lastName": "Perez",
+  "businessName": "",
+  "email": "juan@mail.com",
+  "address": "Quito",
+  "telephoneNumber": "0999999999"
+}
+```
+
+Response exitosa:
+
+```json
+{
+  "response": true,
+  "data": {
+    "_id": "...",
+    "personId": "A1234567",
+    "documentType": "pasaporte",
+    "type": 1
+  }
+}
+```
+
+## 4.2 Actualizar persona
+
+**PUT** `/personas/:id`
+
+- Debe aceptar y persistir `documentType`.
+- Debe revalidar consistencia `type + documentType + personId`.
+
+## 4.3 Filtrar/buscar personas
+
+**POST** `/personas/filter`
+
+Compatibilidad requerida:
+
+1. Mantener filtros actuales por `personId`.
+2. Permitir filtro opcional por `documentType` para evitar ambigüedad futura.
+
+Ejemplo:
+
+```json
+{
+  "personId": "A1234567",
+  "documentType": "pasaporte"
+}
+```
+
+## 4.4 Respuesta de clientes (compatibilidad)
+
+Si el endpoint de clientes devuelve campos documentales directos, incluir
+también el tipo de documento para no romper vistas que no expanden persona.
+
+Opciones válidas:
+
+1. Expandir `personId` como objeto e incluir `personId.documentType`.
+2. Exponer campo plano en cliente (ej. `documentType`) sincronizado con persona.
+
+Ejemplo recomendado de salida:
+
+```json
+{
+  "_id": "client_001",
+  "name": "Juan",
+  "personId": {
+    "_id": "person_001",
+    "personId": "A1234567",
+    "documentType": "pasaporte",
+    "type": 1
+  },
+  "num_document": "A1234567"
+}
+```
+
+---
+
+## 5) Retrocompatibilidad (no romper lógica actual)
+
+Para evitar ruptura en registros existentes y en pantallas que aún no envían `documentType`:
+
+1. En create/update, si no llega `documentType`, inferir temporalmente:
+   - `type = 1` => `documentType = cedula`
+   - `type = 2` => `documentType = ruc`
+2. Responder siempre `documentType` en payload de salida.
+3. Marcar la inferencia como comportamiento de transición y planificar deprecación.
+
+---
+
+## 6) Migración de datos
+
+Crear script de migración para registros históricos en colección de personas:
+
+1. Si `documentType` no existe y `type = 1` => set `documentType = cedula`.
+2. Si `documentType` no existe y `type = 2` => set `documentType = ruc`.
+3. Registrar conteos de documentos migrados y excepciones.
+
+---
+
+## 7) Errores esperados (estándar)
+
+Cuando falle validación, retornar `400` con estructura consistente:
+
+```json
+{
+  "response": false,
+  "message": "documentType no válido para el tipo de persona",
+  "errorCode": "PERSON_DOCUMENT_TYPE_INVALID"
+}
+```
+
+Códigos sugeridos:
+
+1. `PERSON_DOCUMENT_TYPE_REQUIRED`
+2. `PERSON_DOCUMENT_TYPE_INVALID`
+3. `PERSON_DOCUMENT_NUMBER_INVALID`
+4. `PERSON_TYPE_DOCUMENT_MISMATCH`
+
+---
+
+## 8) Criterios de aceptación
+
+1. Backend acepta y persiste `documentType` en create/update de persona.
+2. Backend valida combinaciones `type + documentType`.
+3. Backend valida formato de `personId` según `documentType`.
+4. Endpoints devuelven `documentType` en respuestas de persona.
+5. Registros antiguos quedan con `documentType` poblado por migración.
+6. Flujo actual sin `documentType` sigue funcionando durante transición.
+7. Endpoints de clientes mantienen consistencia documental con persona (sin divergencias entre `num_document` y `personId`).
+
+---
+
+## 9) Estrategia recomendada de implementación (por fases)
+
+### Fase 1 — Backend compatible
+
+1. Agregar campo `documentType` en schema de personas.
+2. Implementar validaciones y fallback por inferencia.
+3. Desplegar sin exigir cambios inmediatos de frontend.
+
+### Fase 2 — Frontend ajustado
+
+1. Exponer selector de documento en registro cliente.
+2. Enviar `documentType` explícito en payload de persona.
+3. Ajustar validaciones locales por tipo de documento.
+
+### Fase 3 — Endurecimiento
+
+1. Ejecutar migración completa.
+2. Monitorear tráfico y errores.
+3. Remover inferencia y volver `documentType` estrictamente requerido.
+
+---
+
+## 10) Riesgos y mitigación
+
+1. Riesgo: duplicados por tratar mismo `personId` con distinto tipo.
+   Mitigación: definir unicidad compuesta recomendada (`personId + documentType`).
+
+2. Riesgo: clientes existentes sin `documentType`.
+   Mitigación: fallback + migración por lotes + métricas.
+
+3. Riesgo: regresión en checkout por datos históricos.
+   Mitigación: respuesta de API siempre normalizada incluyendo `documentType`.
+
+4. Riesgo: divergencia entre datos de persona y cliente por duplicación documental.
+  Mitigación: definir una sola fuente de verdad (`persona`) y sincronización controlada de campos legado en cliente.
+
+---
+
+## 11) Decisión de diseño recomendada
+
+Mantener separados:
+
+1. `type` (natural/jurídica) para lógica tributaria/comercial.
+2. `documentType` (cédula/RUC/pasaporte) para validación de identidad.
+
+No reemplazar `type` por `documentType`; agregarlo como dimensión adicional.
+Eso minimiza impacto y preserva el comportamiento actual.
+
+Adicionalmente, tratar a `persona` como fuente de verdad y a `cliente` como
+consumidor de esa identidad (con denormalización solo por compatibilidad).
